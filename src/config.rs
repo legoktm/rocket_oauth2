@@ -64,8 +64,8 @@ impl OAuthConfig {
     ///
     /// fn main() {
     ///     rocket::ignite()
-    ///         .attach(AdHoc::on_attach("OAuth Config", |rocket| {
-    ///             let config = OAuthConfig::from_config(rocket.config(), "github").unwrap();
+    ///         .attach(AdHoc::on_attach("OAuth Config", |mut rocket| async {
+    ///             let config = OAuthConfig::from_config(rocket.config().await, "github").unwrap();
     ///             Ok(rocket.attach(OAuth2::<GitHub>::custom(HyperSyncRustlsAdapter, config)))
     ///         }))
     ///         .launch();

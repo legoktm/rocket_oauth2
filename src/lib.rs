@@ -55,7 +55,6 @@
 //! and attach the [OAuth2 Fairing](OAuth2::fairing()):
 //!
 //! ```rust,no_run
-//! # #![feature(proc_macro_hygiene, decl_macro)]
 //! # #[macro_use] extern crate rocket;
 //! # extern crate rocket_oauth2;
 //! # use rocket::http::{Cookie, Cookies, SameSite};
@@ -156,7 +155,7 @@ use rocket::http::uri::Absolute;
 use rocket::http::{Cookie, Cookies, SameSite, Status};
 use rocket::request::{self, FormItems, FromForm, FromRequest, Request};
 use rocket::response::Redirect;
-use rocket::{Outcome, State};
+use rocket::{outcome::Outcome, State};
 use serde_json::Value;
 
 const STATE_COOKIE_NAME: &str = "rocket_oauth2_state";
@@ -194,7 +193,6 @@ pub enum TokenRequest {
 /// # Example
 ///
 /// ```rust
-/// # #![feature(proc_macro_hygiene, decl_macro)]
 /// # #[macro_use] extern crate rocket;
 /// # use rocket::http::Cookies;
 /// # use rocket::response::Redirect;
@@ -211,7 +209,6 @@ pub enum TokenRequest {
 /// ```
 ///
 /// ```rust
-/// # #![feature(proc_macro_hygiene, decl_macro)]
 /// # #[macro_use] extern crate rocket;
 /// # use rocket::http::Cookies;
 /// # use rocket::response::Redirect;
@@ -244,7 +241,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -271,7 +267,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct MyProvider;
@@ -290,7 +285,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -312,7 +306,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -334,7 +327,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -355,7 +347,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -382,7 +373,6 @@ impl<K> TokenResponse<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::TokenResponse;
     ///
     /// struct GitHub;
@@ -439,6 +429,7 @@ impl std::convert::TryFrom<Value> for TokenResponse<()> {
     }
 }
 
+#[rocket::async_trait]
 impl<'a, 'r, K: 'static> FromRequest<'a, 'r> for TokenResponse<K> {
     type Error = Error;
 
@@ -446,9 +437,10 @@ impl<'a, 'r, K: 'static> FromRequest<'a, 'r> for TokenResponse<K> {
     // TODO: What do providers do if they *reject* the authorization?
     /// Handle the redirect callback, delegating to the Adapter to perform the
     /// token exchange.
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+    async fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
         let oauth2 = request
             .guard::<State<Arc<Shared<K>>>>()
+            .await
             .expect("OAuth2 fairing was not attached for this key type!")
             .inner();
 
@@ -488,7 +480,7 @@ impl<'a, 'r, K: 'static> FromRequest<'a, 'r> for TokenResponse<K> {
         {
             // Verify that the given state is the same one in the cookie.
             // Begin a new scope so that cookies is not kept around too long.
-            let mut cookies = request.guard::<Cookies<'_>>().expect("request cookies");
+            let mut cookies = request.guard::<Cookies<'_>>().await.expect("request cookies");
             match cookies.get_private(STATE_COOKIE_NAME) {
                 Some(ref cookie) if cookie.value() == params.state => {
                     cookies.remove(cookie.clone());
@@ -594,8 +586,8 @@ impl<K: 'static> OAuth2<K> {
         // Unfortunate allocations, but necessary because on_attach requires 'static
         let config_name = config_name.to_string();
 
-        AdHoc::on_attach("OAuth Init", move |rocket| {
-            let config = match OAuthConfig::from_config(rocket.config(), &config_name) {
+        AdHoc::on_attach("OAuth Init", move |mut rocket| async move {
+            let config = match OAuthConfig::from_config(rocket.config().await, &config_name) {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("Invalid configuration: {:?}", e);
@@ -622,7 +614,7 @@ impl<K: 'static> OAuth2<K> {
     ///
     /// fn main() {
     ///     rocket::ignite()
-    ///         .attach(AdHoc::on_attach("OAuth Config", |rocket| {
+    ///         .attach(AdHoc::on_attach("OAuth Config", |rocket| async {
     ///             let config = OAuthConfig::new(
     ///                 StaticProvider {
     ///                     auth_uri: "auth uri".into(),
@@ -643,7 +635,10 @@ impl<K: 'static> OAuth2<K> {
             _k: PhantomData,
         };
 
-        AdHoc::on_attach("OAuth Mount", |rocket| Ok(rocket.manage(Arc::new(shared))))
+        AdHoc::on_attach(
+            "OAuth Mount",
+            |rocket| async { Ok(rocket.manage(Arc::new(shared))) }
+        )
     }
 
     /// Prepare an authentication redirect. This sets a state cookie and returns
@@ -652,7 +647,6 @@ impl<K: 'static> OAuth2<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket::http::Cookies;
     /// use rocket::response::Redirect;
     /// use rocket_oauth2::OAuth2;
@@ -688,7 +682,6 @@ impl<K: 'static> OAuth2<K> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(decl_macro)]
     /// use rocket_oauth2::OAuth2;
     ///
     /// struct GitHub;
@@ -711,13 +704,15 @@ impl<K: 'static> OAuth2<K> {
     }
 }
 
+#[rocket::async_trait]
 impl<'a, 'r, K: 'static> FromRequest<'a, 'r> for OAuth2<K> {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+    async fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
         Outcome::Success(OAuth2(
             request
                 .guard::<State<Arc<Shared<K>>>>()
+                .await
                 .expect("OAuth2 fairing was not attached for this key type!")
                 .clone(),
         ))
